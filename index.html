@@ -1,0 +1,806 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Secure e-Voting (Commit-Reveal)</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/5.7.2/ethers.umd.min.js"></script>
+    <style>
+      :root {
+        --primary: #0d6efd;
+        --success: #198754;
+        --danger: #dc3545;
+        --warning: #ffc107;
+        --dark: #212529;
+        --light: #f8f9fa;
+      }
+      body {
+        font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        background-color: #eef2f5;
+        color: var(--dark);
+        margin: 0;
+        padding: 20px;
+        text-align: center;
+      }
+      .container {
+        max-width: 800px;
+        margin: 0 auto;
+        background: white;
+        padding: 40px;
+        border-radius: 16px;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.05);
+      }
+      h1 {
+        margin-bottom: 10px;
+        color: #2c3e50;
+      }
+
+      /* Badges */
+      .badges-container {
+        margin: 20px 0;
+        display: flex;
+        justify-content: center;
+        gap: 10px;
+      }
+      .badge {
+        padding: 8px 15px;
+        border-radius: 50px;
+        font-weight: 600;
+        font-size: 0.9rem;
+        background: #e9ecef;
+        color: #495057;
+      }
+      .badge.connected {
+        background: #d1e7dd;
+        color: #0f5132;
+      }
+
+      /* Buttons */
+      button {
+        padding: 12px 24px;
+        border: none;
+        border-radius: 8px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.2s ease;
+        margin: 5px;
+      }
+      button:hover {
+        transform: translateY(-2px);
+        filter: brightness(110%);
+      }
+      button:active {
+        transform: scale(0.98);
+      }
+
+      .btn-primary {
+        background: var(--primary);
+        color: white;
+        width: 100%;
+        max-width: 300px;
+      }
+      .btn-success {
+        background: var(--success);
+        color: white;
+      }
+      .btn-danger {
+        background: var(--danger);
+        color: white;
+      }
+      .btn-warning {
+        background: var(--warning);
+        color: #000;
+      }
+
+      /* Inputs */
+      input,
+      select {
+        padding: 12px;
+        width: 70%;
+        border: 2px solid #dee2e6;
+        border-radius: 8px;
+        margin-bottom: 10px;
+        font-size: 1rem;
+      }
+      input:focus,
+      select:focus {
+        outline: none;
+        border-color: var(--primary);
+      }
+
+      /* Sections */
+      .box {
+        border: 1px solid #e9ecef;
+        padding: 25px;
+        margin: 25px 0;
+        border-radius: 12px;
+        background: #fff;
+        transition: 0.3s;
+      }
+      .box:hover {
+        box-shadow: 0 5px 15px rgba(0, 0, 0, 0.03);
+      }
+      .hidden {
+        display: none;
+      }
+
+      #adminPanel {
+        border: 2px dashed var(--warning);
+        background: #fffdf5;
+      }
+
+      /* Logs */
+      #statusLog {
+        background: #1e1e1e;
+        color: #00ff9d;
+        padding: 15px;
+        border-radius: 8px;
+        font-family: "Consolas", monospace;
+        text-align: left;
+        margin-top: 30px;
+        height: 120px;
+        overflow-y: auto;
+        font-size: 0.9rem;
+        border-left: 5px solid var(--primary);
+      }
+
+      .log-entry {
+        margin-bottom: 5px;
+        border-bottom: 1px solid #333;
+        padding-bottom: 2px;
+      }
+      .timestamp {
+        color: #888;
+        font-size: 0.8em;
+        margin-right: 10px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h1>E-Voting System</h1>
+
+      <div class="badges-container">
+        <div class="badge" id="networkStatus">Disconnected</div>
+        <div class="badge" id="phaseDisplay">Phase: Loading</div>
+      </div>
+
+      <button onclick="connectWallet()" class="btn-primary" id="connectBtn">
+        Connect Wallet (Sepolia)
+      </button>
+      <p
+        id="walletAddress"
+        style="font-family: monospace; color: #666; margin-top: 10px"
+      >
+        --
+      </p>
+
+      <div id="adminPanel" class="box hidden">
+        <h3 style="color: #d68e00">Admin Control Panel</h3>
+        <div
+          style="
+            display: flex;
+            justify-content: center;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-bottom: 20px;
+          "
+        >
+          <button onclick="changePhase('startCommitPhase')" class="btn-warning">
+            1. Start Voting
+          </button>
+          <button onclick="changePhase('startRevealPhase')" class="btn-warning">
+            2. Start Reveal
+          </button>
+          <button onclick="changePhase('endVoting')" class="btn-danger">
+            3. End Election
+          </button>
+        </div>
+        <hr style="border-top: 1px dashed #ccc; margin: 20px 0" />
+
+        <div>
+          <input
+            type="text"
+            id="newCandidateName"
+            placeholder="Candidate Name (e.g., Mohamed)"
+          />
+          <button
+            onclick="addCandidate()"
+            class="btn-success"
+            style="width: auto"
+          >
+            Add Candidate
+          </button>
+        </div>
+        <div style="margin-top: 10px">
+          <input type="text" id="voterList" placeholder="0x123, 0x456 ,0x789" />
+          <button
+            onclick="registerVoters()"
+            class="btn-success"
+            style="width: auto"
+          >
+            Register Voters
+          </button>
+        </div>
+      </div>
+
+      <div id="commitSection" class="box hidden">
+        <h3>Phase 1: Secret Voting (Commit)</h3>
+        <p>Select your candidate. Your vote will be encrypted.</p>
+        <select id="candidateSelect">
+          <option>Loading Candidates...</option>
+        </select>
+        <br />
+        <button onclick="commitVote()" class="btn-primary">
+          Submit Encrypted Vote
+        </button>
+      </div>
+
+      <div id="revealSection" class="box hidden">
+        <h3>Phase 2: Reveal Vote</h3>
+        <p>It's time to reveal your vote to be counted.</p>
+        <p id="secretStatus" style="font-weight: bold">
+          Searching for secret key...
+        </p>
+        <button onclick="revealVote()" class="btn-success">
+          Reveal & Count Vote
+        </button>
+      </div>
+
+      <div id="resultSection" class="box hidden">
+        <h3>Final Results</h3>
+        <button onclick="getWinner()" class="btn-primary">Show Winner</button>
+        <h2
+          id="winnerName"
+          style="color: var(--success); margin-top: 20px; font-size: 2rem"
+        ></h2>
+      </div>
+
+      <div id="statusLog">
+        <div class="log-entry">> System Ready...</div>
+      </div>
+    </div>
+
+    <script>
+      const contractAddress = "0x4568B8D0DAEda62AC6A7eB6797B2bBf853404908";
+
+      const contractABI = [
+        {
+          inputs: [],
+          stateMutability: "nonpayable",
+          type: "constructor",
+        },
+        {
+          anonymous: false,
+          inputs: [
+            {
+              indexed: false,
+              internalType: "uint256",
+              name: "id",
+              type: "uint256",
+            },
+            {
+              indexed: false,
+              internalType: "string",
+              name: "name",
+              type: "string",
+            },
+          ],
+          name: "CandidateAdded",
+          type: "event",
+        },
+        {
+          anonymous: false,
+          inputs: [
+            {
+              indexed: false,
+              internalType: "enum eVoting.State",
+              name: "newState",
+              type: "uint8",
+            },
+          ],
+          name: "StateChanged",
+          type: "event",
+        },
+        {
+          anonymous: false,
+          inputs: [
+            {
+              indexed: false,
+              internalType: "address",
+              name: "voter",
+              type: "address",
+            },
+          ],
+          name: "VoteCommitted",
+          type: "event",
+        },
+        {
+          anonymous: false,
+          inputs: [
+            {
+              indexed: false,
+              internalType: "address",
+              name: "voter",
+              type: "address",
+            },
+            {
+              indexed: false,
+              internalType: "uint256",
+              name: "candidateId",
+              type: "uint256",
+            },
+          ],
+          name: "VoteRevealed",
+          type: "event",
+        },
+        {
+          anonymous: false,
+          inputs: [
+            {
+              indexed: false,
+              internalType: "address",
+              name: "voter",
+              type: "address",
+            },
+          ],
+          name: "VoterRegistered",
+          type: "event",
+        },
+        {
+          inputs: [
+            {
+              internalType: "string",
+              name: "_name",
+              type: "string",
+            },
+          ],
+          name: "addCandidate",
+          outputs: [],
+          stateMutability: "nonpayable",
+          type: "function",
+        },
+        {
+          inputs: [
+            {
+              internalType: "uint256",
+              name: "",
+              type: "uint256",
+            },
+          ],
+          name: "candidates",
+          outputs: [
+            {
+              internalType: "uint256",
+              name: "id",
+              type: "uint256",
+            },
+            {
+              internalType: "string",
+              name: "name",
+              type: "string",
+            },
+            {
+              internalType: "uint256",
+              name: "voteCount",
+              type: "uint256",
+            },
+          ],
+          stateMutability: "view",
+          type: "function",
+        },
+        {
+          inputs: [],
+          name: "candidatesCount",
+          outputs: [
+            {
+              internalType: "uint256",
+              name: "",
+              type: "uint256",
+            },
+          ],
+          stateMutability: "view",
+          type: "function",
+        },
+        {
+          inputs: [
+            {
+              internalType: "bytes32",
+              name: "_commitment",
+              type: "bytes32",
+            },
+          ],
+          name: "commitVote",
+          outputs: [],
+          stateMutability: "nonpayable",
+          type: "function",
+        },
+        {
+          inputs: [],
+          name: "currentState",
+          outputs: [
+            {
+              internalType: "enum eVoting.State",
+              name: "",
+              type: "uint8",
+            },
+          ],
+          stateMutability: "view",
+          type: "function",
+        },
+        {
+          inputs: [],
+          name: "endVoting",
+          outputs: [],
+          stateMutability: "nonpayable",
+          type: "function",
+        },
+        {
+          inputs: [],
+          name: "getAllCandidates",
+          outputs: [
+            {
+              components: [
+                {
+                  internalType: "uint256",
+                  name: "id",
+                  type: "uint256",
+                },
+                {
+                  internalType: "string",
+                  name: "name",
+                  type: "string",
+                },
+                {
+                  internalType: "uint256",
+                  name: "voteCount",
+                  type: "uint256",
+                },
+              ],
+              internalType: "struct eVoting.Candidate[]",
+              name: "",
+              type: "tuple[]",
+            },
+          ],
+          stateMutability: "view",
+          type: "function",
+        },
+        {
+          inputs: [
+            {
+              internalType: "uint256",
+              name: "_candidateId",
+              type: "uint256",
+            },
+            {
+              internalType: "bytes32",
+              name: "_secret",
+              type: "bytes32",
+            },
+          ],
+          name: "getHash",
+          outputs: [
+            {
+              internalType: "bytes32",
+              name: "",
+              type: "bytes32",
+            },
+          ],
+          stateMutability: "pure",
+          type: "function",
+        },
+        {
+          inputs: [],
+          name: "getWinner",
+          outputs: [
+            {
+              internalType: "string[]",
+              name: "winnerNames",
+              type: "string[]",
+            },
+          ],
+          stateMutability: "view",
+          type: "function",
+        },
+        {
+          inputs: [],
+          name: "owner",
+          outputs: [
+            {
+              internalType: "address",
+              name: "",
+              type: "address",
+            },
+          ],
+          stateMutability: "view",
+          type: "function",
+        },
+        {
+          inputs: [
+            {
+              internalType: "address[]",
+              name: "_voterAddresses",
+              type: "address[]",
+            },
+          ],
+          name: "registerVoter",
+          outputs: [],
+          stateMutability: "nonpayable",
+          type: "function",
+        },
+        {
+          inputs: [
+            {
+              internalType: "uint256",
+              name: "_candidateId",
+              type: "uint256",
+            },
+            {
+              internalType: "bytes32",
+              name: "_secret",
+              type: "bytes32",
+            },
+          ],
+          name: "revealVote",
+          outputs: [],
+          stateMutability: "nonpayable",
+          type: "function",
+        },
+        {
+          inputs: [],
+          name: "startCommitPhase",
+          outputs: [],
+          stateMutability: "nonpayable",
+          type: "function",
+        },
+        {
+          inputs: [],
+          name: "startRevealPhase",
+          outputs: [],
+          stateMutability: "nonpayable",
+          type: "function",
+        },
+        {
+          inputs: [
+            {
+              internalType: "address",
+              name: "",
+              type: "address",
+            },
+          ],
+          name: "voters",
+          outputs: [
+            {
+              internalType: "bool",
+              name: "isRegistered",
+              type: "bool",
+            },
+            {
+              internalType: "bool",
+              name: "hasCommitted",
+              type: "bool",
+            },
+            {
+              internalType: "bool",
+              name: "hasRevealed",
+              type: "bool",
+            },
+            {
+              internalType: "bytes32",
+              name: "commitment",
+              type: "bytes32",
+            },
+          ],
+          stateMutability: "view",
+          type: "function",
+        },
+      ];
+
+      let provider, signer, contract, userAddress;
+      const phases = ["Registration", "Voting (Commit)", "Revealing", "Ended"];
+
+      function log(msg) {
+        const logDiv = document.getElementById("statusLog");
+        const time = new Date().toLocaleTimeString();
+        logDiv.innerHTML += `<div class="log-entry"><span class="timestamp">[${time}]</span> ${msg}</div>`;
+        logDiv.scrollTop = logDiv.scrollHeight;
+        console.log(msg);
+      }
+
+      async function connectWallet() {
+        if (!window.ethereum) return log("MetaMask is not installed!");
+        try {
+          await window.ethereum.request({ method: "eth_requestAccounts" });
+          provider = new ethers.providers.Web3Provider(window.ethereum);
+          signer = provider.getSigner();
+          userAddress = await signer.getAddress();
+          contract = new ethers.Contract(contractAddress, contractABI, signer);
+
+          document.getElementById("walletAddress").innerText =
+            "User: " + userAddress;
+          document.getElementById("connectBtn").style.display = "none";
+
+          const badge = document.getElementById("networkStatus");
+          badge.innerText = "Connected";
+          badge.classList.add("connected");
+
+          log("Wallet connected successfully!");
+          checkOwner();
+          refreshData();
+          // Listen for events
+          contract.on("StateChanged", () => {
+            log("Election phase changed!");
+            refreshData();
+          });
+        } catch (err) {
+          log("Connection Error: " + err.message);
+        }
+      }
+
+      async function refreshData() {
+        try {
+          const state = await contract.currentState();
+          document.getElementById("phaseDisplay").innerText =
+            "Phase: " + phases[state];
+
+          // Hide all sections first
+          document.querySelectorAll(".box").forEach((el) => {
+            if (el.id !== "adminPanel") el.classList.add("hidden");
+          });
+
+          // Show relevant section
+          if (state === 1) {
+            // Commit
+            document.getElementById("commitSection").classList.remove("hidden");
+            loadCandidates();
+          } else if (state === 2) {
+            // Reveal
+            document.getElementById("revealSection").classList.remove("hidden");
+            checkSecret();
+          } else if (state === 3) {
+            // Finished
+            document.getElementById("resultSection").classList.remove("hidden");
+          }
+        } catch (err) {
+          log("Failed to fetch data. Check network/contract address.");
+          console.error(err);
+        }
+      }
+
+      async function checkOwner() {
+        try {
+          const owner = await contract.owner();
+          if (owner.toLowerCase() === userAddress.toLowerCase()) {
+            document.getElementById("adminPanel").classList.remove("hidden");
+            log("Admin privileges detected.");
+          }
+        } catch (e) {
+          console.error(e);
+        }
+      }
+
+      async function loadCandidates() {
+        try {
+          const list = await contract.getAllCandidates();
+          const select = document.getElementById("candidateSelect");
+          select.innerHTML = "";
+          list.forEach((c) => {
+            const opt = document.createElement("option");
+            opt.value = c.id;
+            opt.text = `${c.name} (ID: ${c.id})`;
+            select.appendChild(opt);
+          });
+        } catch (e) {
+          log("Error loading candidates.");
+        }
+      }
+
+      async function commitVote() {
+        const id = document.getElementById("candidateSelect").value;
+        try {
+          log("Encrypting vote & sending transaction");
+
+          const secret = ethers.utils.hexlify(ethers.utils.randomBytes(32));
+
+          const hash = ethers.utils.solidityKeccak256(
+            ["uint256", "bytes32"],
+            [id, secret]
+          );
+
+          const tx = await contract.commitVote(hash);
+          log("Tx sent. Waiting for confirmation");
+          await tx.wait();
+
+          const data = { id, secret };
+          localStorage.setItem("vote_" + userAddress, JSON.stringify(data));
+
+          log("Vote Committed! Secret key saved in browser.");
+        } catch (err) {
+          log("Commit Failed: " + (err.reason || err.message));
+        }
+      }
+
+      async function revealVote() {
+        try {
+          const stored = localStorage.getItem("vote_" + userAddress);
+          if (!stored) return log("No secret key found for this account!");
+
+          const { id, secret } = JSON.parse(stored);
+
+          log("Revealing vote on-chain");
+          const tx = await contract.revealVote(id, secret);
+          await tx.wait();
+
+          log("Vote Revealed & Counted successfully");
+        } catch (err) {
+          log("Reveal Failed: " + (err.reason || err.message));
+        }
+      }
+
+      function checkSecret() {
+        const stored = localStorage.getItem("vote_" + userAddress);
+        const status = document.getElementById("secretStatus");
+        if (stored) {
+          const { id } = JSON.parse(stored);
+          status.innerText = `Secret found for Candidate ID: ${id}`;
+          status.style.color = "var(--success)";
+        } else {
+          status.innerText = "No secret found! Did you vote from this device?";
+          status.style.color = "var(--danger)";
+        }
+      }
+
+      async function changePhase(fn) {
+        try {
+          log(" Changing phase...");
+          const tx = await contract[fn]();
+          await tx.wait();
+          log(" Phase updated successfully.");
+        } catch (err) {
+          log(" Error: " + (err.reason || err.message));
+        }
+      }
+
+      async function addCandidate() {
+        const name = document.getElementById("newCandidateName").value;
+        if (!name) return alert("Please enter a name");
+        try {
+          const tx = await contract.addCandidate(name);
+          log("Adding candidate...");
+          await tx.wait();
+          log(`Candidate "${name}" added.`);
+          document.getElementById("newCandidateName").value = "";
+        } catch (err) {
+          log("Error: " + (err.reason || err.message));
+        }
+      }
+
+      async function registerVoters() {
+        const val = document.getElementById("voterList").value;
+        if (!val) return alert("Please enter addresses");
+        const addrs = val.split(",").map((s) => s.trim());
+        try {
+          const tx = await contract.registerVoter(addrs);
+          log("Registering voters...");
+          await tx.wait();
+          log(`${addrs.length} Voters registered.`);
+          document.getElementById("voterList").value = "";
+        } catch (err) {
+          log("Error: " + (err.reason || err.message));
+        }
+      }
+
+      async function getWinner() {
+        try {
+          const w = await contract.getWinner();
+          const display = w.length > 0 ? w.join(", ") : "No votes yet / Draw";
+          document.getElementById("winnerName").innerText =
+            "Winner: " + display;
+          log("Winner announced: " + display);
+        } catch (err) {
+          log("Error: " + (err.reason || err.message));
+        }
+      }
+    </script>
+  </body>
+</html>
